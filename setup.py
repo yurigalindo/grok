@@ -11,6 +11,7 @@ setup(
         "torch",
         "tqdm",
         "scipy",
+        "sympy",
         "mod",
         "matplotlib",
     ],
