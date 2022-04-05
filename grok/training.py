@@ -677,6 +677,9 @@ def train(hparams: Namespace) -> None:
     # Process the args
     if hparams.logdir is None:
         hparams.logdir = os.environ.get("LOGDIR", ".")
+    
+    # Doubt !!
+    # Why normalizing path again? Can be moved inside if statement because if log path is set, it is already normalized in hparams.
     hparams.logdir = os.path.abspath(hparams.logdir)
 
     # Make sure d_model, heads, and d_key are compatible
