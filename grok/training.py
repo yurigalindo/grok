@@ -742,6 +742,8 @@ def train(hparams: Namespace) -> None:
         "logger": logger,
         "log_every_n_steps": 1,
         "flush_logs_every_n_steps": 1000,
+        # Adding checkpoint based resumtion
+        "resume_from_checkpoint": "/path/to/checkpoints/epoch_65536.ckpt"
     }
     if torch.cuda.is_available() and hparams.gpu >= 0:
         trainer_args["gpus"] = [hparams.gpu]
