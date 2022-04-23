@@ -440,6 +440,21 @@ class TrainableTransformer(LightningModule):
         :returns: a dict with loss, accuracy, lr, probabilities of solutions,
                   attentions, and values
         """
+        
+        # Hack : Adding tensor to GPU to continue training on HPC
+        if torch.cuda.is_available():
+            dev = "cuda:0" 
+        else:  
+            dev = "cpu"
+        device = torch.device(dev)
+        N = 6000
+        with torch.no_grad():
+            a = torch.zeros(N,N)
+            a = a.to(device)
+            
+            a = a @ a
+            
+            
         if batch_idx == 0:
             self.training_epoch_start_time = time.time()
             self.fwd_time_in_epoch = 0
