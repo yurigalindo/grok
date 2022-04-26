@@ -9,7 +9,7 @@ def _identity(x):
     return x
 
 
-def get_saturation(module, *args, **kwargs, extract_fn=_identity, infinity: float = 1e9):
+def get_saturation(module, *args, **kwargs, extract_fn=_identity, infinity: float = 1000):
     """Get the saturation scores of a model over a dataset that can be specified through `*args, **kwargs`.
     
     Note that `module` should return a [batch_size, feature_dim] vector, or `extract_fn` should format its output this way.
