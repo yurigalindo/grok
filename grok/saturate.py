@@ -24,7 +24,8 @@ def get_saturation(module, *args, **kwargs, extract_fn=_identity, infinity: floa
     soft_norm = soft_vector.norm(p=2, dim=1)
     hard_norm = hard_vector.norm(p=2, dim=1)
     # Add 1e-9 for numerical stability.
-    return inner_prods / (soft_norm * hard_norm + 1e-9)
+    scores = inner_prods / (soft_norm * hard_norm + 1e-9)
+    return scores.mean()
 
 
 class saturate:
