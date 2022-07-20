@@ -724,7 +724,7 @@ def train(hparams: Namespace) -> None:
         "logger": logger,
         "log_every_n_steps": 1,
         "flush_logs_every_n_steps": 1000,
-        "resume_from_checkpoint": "/Users/amanshukla/miniforge3/grok/checkpoints/basic/epoch_65536.ckpt"
+        "resume_from_checkpoint": "" # Path to stored checpoint
     }
     if torch.cuda.is_available() and hparams.gpu >= 0:
         trainer_args["gpus"] = [hparams.gpu]
