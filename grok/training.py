@@ -92,14 +92,14 @@ class TrainableTransformer(LightningModule):
         parser.add_argument("--non_linearity", type=str, default="relu")
         parser.add_argument("--max_context_len", type=int, default=50)
 
-        parser.add_argument("--math_operator", type=str, default="+")
+        parser.add_argument("--math_operator", type=str, default="/")
         parser.add_argument(
             "--operand_length",
             type=int,
             help="for list operations, the length of the lists",
         )
 
-        parser.add_argument("--train_data_pct", type=float, default=5)
+        parser.add_argument("--train_data_pct", type=float, default=50)
         parser.add_argument("--warmup_steps", type=int, default=10)
         parser.add_argument("--anneal_lr_steps", type=int, default=100000)
         parser.add_argument("--anneal_lr", dest="anneal_lr", action="store_true")
@@ -601,8 +601,8 @@ class TrainableTransformer(LightningModule):
         # save a checkpoint if the epoch is a power of 2
         if (
             self.current_epoch > 0
-            and int(2 ** (int(np.log(self.current_epoch) / np.log(2))))
-            == self.current_epoch
+            and (int(2 ** (int(np.log(self.current_epoch) / np.log(2))))
+            == self.current_epoch or self.current_epoch % 10000 == 0)
         ):
             self.trainer.save_checkpoint(
                 os.path.join(
@@ -695,7 +695,7 @@ def train(hparams: Namespace) -> None:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-    checkpoint_path = hparams.logdir + "/checkpoints"
+    checkpoint_path = hparams.logdir + "/checkpoints/basic"
     os.makedirs(checkpoint_path, exist_ok=True)
     hparams.checkpoint_path = checkpoint_path
 
@@ -724,6 +724,7 @@ def train(hparams: Namespace) -> None:
         "logger": logger,
         "log_every_n_steps": 1,
         "flush_logs_every_n_steps": 1000,
+        "resume_from_checkpoint": "/Users/amanshukla/miniforge3/grok/checkpoints/basic/epoch_65536.ckpt"
     }
     if torch.cuda.is_available() and hparams.gpu >= 0:
         trainer_args["gpus"] = [hparams.gpu]
