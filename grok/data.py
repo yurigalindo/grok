@@ -43,7 +43,7 @@ EQ_TOKEN = "="
 MODULUS = 97
 NUMS = list(range(MODULUS))
 
-DEFAULT_DATA_DIR = "data"
+DEFAULT_DATA_DIR = "data/"
 
 
 def render(operand, join_str=""):
@@ -60,7 +60,7 @@ def render(operand, join_str=""):
     else:
         return str(operand)
 
-
+# Missing functions in class
 def create_data_files(data_dir: str = DEFAULT_DATA_DIR):
     ArithmeticTokenizer.create_token_file(data_dir)
     ArithmeticDataset.create_dataset_files(data_dir)
@@ -156,12 +156,12 @@ class ArithmeticDataset:
 
         ds_name = cls.get_dsname(operator, operand_length)
         eqs = cls.make_data(operator, operand_length)
-
+        # print(len(eqs), eqs)
         train_rows, _ = cls.calc_split_len(train_pct, len(eqs))
 
         train_ds = cls(ds_name, eqs[:train_rows], train=True, data_dir=data_dir)
         val_ds = cls(ds_name, eqs[train_rows:], train=False, data_dir=data_dir)
-
+        
         return train_ds, val_ds
 
     @classmethod
@@ -356,6 +356,9 @@ class ArithmeticDataset:
 
         data = [EOS_TOKEN + " " + eq + " " + EOS_TOKEN for eq in data]
 
+        # Uncomment to save data
+        # cls.write_dataset(data,VALID_OPERATORS[operator])
+
         return data
 
     # @classmethod
@@ -366,14 +369,14 @@ class ArithmeticDataset:
     #        cls.write_dataset(
     #            cls.make_binary_operation_data(operator), paths["ds_file"]
     #        )
-    #
+    
     #    pass
 
     # @classmethod
-    # def write_dataset(eqs: List[str], ds_file: str):
-    #    print(f"-> writing {ds_file}", flush=True)
-    #    with open(ds_file, "w") as fh:
-    #        fh.writelines([EOS_TOKEN + " " + eq + " " + EOS_TOKEN + "\n" for eq in eqs])
+    def write_dataset(eqs: List[str], ds_file: str):
+       print(f"-> writing {ds_file}", flush=True)
+       with open(ds_file, "w") as fh:
+           fh.writelines([eq + " "+ "\n" for eq in eqs])
 
     @classmethod
     def _make_lists(cls, sizes=[2, 3], nums=NUMS):
