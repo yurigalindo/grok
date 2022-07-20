@@ -156,7 +156,7 @@ class ArithmeticDataset:
 
         ds_name = cls.get_dsname(operator, operand_length)
         eqs = cls.make_data(operator, operand_length)
-        # print(len(eqs), eqs)
+    
         train_rows, _ = cls.calc_split_len(train_pct, len(eqs))
 
         train_ds = cls(ds_name, eqs[:train_rows], train=True, data_dir=data_dir)
@@ -250,8 +250,6 @@ class ArithmeticDataset:
             eq = " ".join(map(render, [a, operator, b, "=", c]))
             eqs.append(eq)
 
-        # if operator == "s5":
-        #     print("eqs", eqs)
         return eqs
 
     # @staticmethod
