@@ -12,5 +12,5 @@ hparams.logdir = os.path.abspath(hparams.logdir)
 
 print(hparams)
 
-ckpts = [f"/scratch/as14034/checkpoints/checkpoint{(i+1)**2}.ckpt" for i in range(20)]
+ckpts = [f"checkpoints/Addition_97_old/epoch_{(2)**i}.ckpt" for i in range(20)]
 grok.training.compute_saturation(hparams, ckpts)

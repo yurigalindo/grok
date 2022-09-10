@@ -696,7 +696,7 @@ def train(hparams: Namespace) -> None:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-    checkpoint_path = hparams.logdir + "/checkpoints/basic"
+    checkpoint_path = hparams.logdir + f"/checkpoints/{hparams.exp_name}"
     os.makedirs(checkpoint_path, exist_ok=True)
     hparams.checkpoint_path = checkpoint_path
 
@@ -784,7 +784,7 @@ def compute_saturation(hparams: Namespace, ckpts)-> None:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-    checkpoint_path = hparams.logdir + "/checkpoints"
+    checkpoint_path = hparams.logdir + f"/checkpoints/{hparams.exp_name}"
     os.makedirs(checkpoint_path, exist_ok=True)
     hparams.checkpoint_path = checkpoint_path
 
@@ -816,7 +816,7 @@ def compute_saturation(hparams: Namespace, ckpts)-> None:
         # model = torch.load(ckpt)
         # model.load_state_dict(torch.load(ckpt))
 
-        checkpoint = torch.load(ckpt)
+        checkpoint = torch.load(ckpt,map_location=torch.device('cpu'))
         # print(dir(checkpoint), type(checkpoint), "Ckpt")
         # for k, v in checkpoint.items():
         #     print(k)
@@ -861,7 +861,7 @@ def compute_sharpness(hparams: Namespace, ckpts) -> None:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-    checkpoint_path = hparams.logdir + "/checkpoints"
+    checkpoint_path = hparams.logdir + f"/checkpoints/{hparams.exp_name}"
     os.makedirs(checkpoint_path, exist_ok=True)
     hparams.checkpoint_path = checkpoint_path
 
@@ -922,7 +922,10 @@ def add_args(parser=None) -> Namespace:
     parser.add_argument("--random_seed", type=int, default=-1)
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--max_epochs", type=int, default=None)
-    parser.add_argument("--max_steps", type=int, default=100000)
+    parser.add_argument("--max_steps", type=int, default=-1)
+    parser.add_argument("--exp_name", type=str)
+    parser.add_argument("--beta_1", type=float, default=0.9)
+    parser.add_argument("--beta_2", type=float, default=0.98)
     # parser.add_argument("--checkpoint_period", type=int, default=1)
     parser = TrainableTransformer.add_model_specific_args(parser)
     return parser
