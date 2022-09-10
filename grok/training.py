@@ -32,6 +32,7 @@ from grok.data import (
 )
 from grok.transformer import Transformer
 from grok.measure import get_sharpness
+from grok.saturate import get_saturation
 
 DEFAULT_LOG_DIR = "logs"
 
@@ -753,6 +754,83 @@ def train(hparams: Namespace) -> None:
     """
     return hparams.logdir
 
+
+def compute_saturation(hparams: Namespace, ckpts)-> None:
+    """
+    Loads a series of checkpoints in the defined 
+    hyperparameters and outputs the level of their saturation.
+
+    :param hparams: An argparse.Namespace with all of the relevant hyperparameters
+    """
+
+    # Process the args
+    if hparams.logdir is None:
+        hparams.logdir = os.environ.get("LOGDIR", ".")
+    hparams.logdir = os.path.abspath(hparams.logdir)
+
+    # Make sure d_model, heads, and d_key are compatible
+    assert (
+        hparams.d_model % hparams.n_heads == 0
+    ), "n_heads=%s does not evenly divide d_model=%s" % (
+        hparams.n_heads,
+        hparams.d_model,
+    )
+    hparams.d_key = hparams.d_model / hparams.n_heads
+
+    # Set up the RNGs for repeatability
+    if hparams.random_seed != -1:
+        torch.manual_seed(hparams.random_seed)
+        torch.cuda.manual_seed(hparams.random_seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+    checkpoint_path = hparams.logdir + "/checkpoints"
+    os.makedirs(checkpoint_path, exist_ok=True)
+    hparams.checkpoint_path = checkpoint_path
+
+    # Create the model
+    model = TrainableTransformer(hparams).float()
+
+    # torch.save(model, os.path.join(checkpoint_path, "init.pt")) we already have init model in our case
+
+    logger = CSVLogger(hparams.logdir)
+
+    trainer_args = {
+        "max_steps": hparams.max_steps,
+        "min_steps": hparams.max_steps,
+        "max_epochs": int(1e8),
+        "val_check_interval": 1,
+        "profiler": False,
+        # "checkpoint_callback": checkpointer,
+        "logger": logger,
+        "log_every_n_steps": 1,
+        "flush_logs_every_n_steps": 1000,
+    }
+    if torch.cuda.is_available() and hparams.gpu >= 0:
+        trainer_args["gpus"] = [hparams.gpu]
+
+    trainer = Trainer(**trainer_args)
+
+    for ckpt in ckpts:
+        print(f"Loading checkpoint {ckpt}")
+        # model = torch.load(ckpt)
+        # model.load_state_dict(torch.load(ckpt))
+
+        checkpoint = torch.load(ckpt)
+        # print(dir(checkpoint), type(checkpoint), "Ckpt")
+        # for k, v in checkpoint.items():
+        #     print(k)
+        # print(checkpoint["hyper_parameters"])
+
+        hps = checkpoint["hyper_parameters"]
+        hps = argparse.Namespace(**hps)
+        model = TrainableTransformer(hps).float()
+        model.load_state_dict(checkpoint["state_dict"])
+
+        sigma = get_saturation(model, model.train_dataloader())
+        results = {}
+        results[ckpt] = sigma
+        pickle.dump(results, open(f"results/results_SD-{i}.pkl", "wb"))
 
 def compute_sharpness(hparams: Namespace, ckpts) -> None:
     """

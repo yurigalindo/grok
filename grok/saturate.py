@@ -9,15 +9,18 @@ def _identity(x):
     return x
 
 
-def get_saturation(module, *args, **kwargs, extract_fn=_identity, infinity: float = 1000):
+def get_saturation(module, extract_fn=_identity, infinity: float = 1000, *args, **kwargs):
     """Get the saturation scores of a model over a dataset that can be specified through `*args, **kwargs`.
     
     Note that `module` should return a [batch_size, feature_dim] vector, or `extract_fn` should format its output this way.
     """
+
+    module.eval()
+
     with saturate(module, infinity=infinity):
-        hard_outputs = model(*args, **kwargs)
+        hard_outputs = module(*args, **kwargs)
         hard_vector = extract_fn(hard_outputs)
-    soft_outputs = model(*args, **kwargs)
+    soft_outputs = module(*args, **kwargs)
     soft_vector = extract_fn(soft_outputs)
     
     inner_prods = torch.einsum("bi, bi -> b", hard_vector, soft_vector)
