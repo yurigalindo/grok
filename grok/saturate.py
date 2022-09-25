@@ -4,6 +4,8 @@ from typing import Union, Iterable
 import torch
 from torch.nn import Module, Parameter
 
+def extract_prediction(x):
+    return torch.squeeze(x[:, -2, :])
 
 def _identity(x):
     return x
@@ -11,25 +13,28 @@ def _identity(x):
 
 def get_saturation(module, *args, **kwargs):
     """Get the saturation scores of a model over a dataset that can be specified through `*args, **kwargs`.
-    
+
     Note that `module` should return a [batch_size, feature_dim] vector, or `extract_fn` should format its output this way.
     """
-    
-    extract_fn = _identity
+
+    extract_fn = extract_prediction
     infinity = 1000
 
     module.eval()
-    with saturate(module, infinity=infinity):
-        hard_outputs = module(*args, **kwargs)
-        hard_vector = extract_fn(hard_outputs)
-    soft_outputs = module(*args, **kwargs)
-    soft_vector = extract_fn(soft_outputs)
+    for x in args[0]:
+        # print(x['text'], x["text"].shape)
+        with saturate(module, infinity=infinity):
+            hard_outputs, _, _ = module(x['text'])
+            hard_vector = extract_fn(hard_outputs)
+        soft_outputs, _, _ = module(x['text'])
+        soft_vector = extract_fn(soft_outputs)
+
+        inner_prods = torch.einsum("bi, bi -> b", hard_vector, soft_vector)
+        soft_norm = soft_vector.norm(p=2, dim=1)
+        hard_norm = hard_vector.norm(p=2, dim=1)
+        # Add 1e-9 for numerical stability.
+        scores = inner_prods / (soft_norm * hard_norm + 1e-9)
     
-    inner_prods = torch.einsum("bi, bi -> b", hard_vector, soft_vector)
-    soft_norm = soft_vector.norm(p=2, dim=1)
-    hard_norm = hard_vector.norm(p=2, dim=1)
-    # Add 1e-9 for numerical stability.
-    scores = inner_prods / (soft_norm * hard_norm + 1e-9)
     return scores.mean()
 
 
@@ -37,9 +42,9 @@ class saturate:
 
     """Context manager in which a model's parameters and forward pass will be saturated.
     We can pass in either a torch module or an iterable of torch parameters to saturated. Gradients will be disabled.
-    
+
     Example usage:
-    
+
     ```python
     with saturate(model):
         outputs = model(inputs)
