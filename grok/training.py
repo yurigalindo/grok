@@ -21,6 +21,7 @@ from pytorch_lightning.callbacks import Callback, ModelCheckpoint
 from pytorch_lightning.loggers import CSVLogger
 from torch import Tensor
 from torch.optim.lr_scheduler import LambdaLR
+from matplotlib import pyplot as plt
 
 import grok.metrics as metrics
 from grok.data import (
@@ -811,7 +812,9 @@ def compute_saturation(hparams: Namespace, ckpts)-> None:
 
     trainer = Trainer(**trainer_args)
 
-    for ckpt in ckpts:
+    results = []
+    norms = []
+    for i, ckpt in enumerate(ckpts):
         print(f"Loading checkpoint {ckpt}")
         # model = torch.load(ckpt)
         # model.load_state_dict(torch.load(ckpt))
@@ -826,11 +829,47 @@ def compute_saturation(hparams: Namespace, ckpts)-> None:
         hps = argparse.Namespace(**hps)
         model = TrainableTransformer(hps).float()
         model.load_state_dict(checkpoint["state_dict"])
+        
+        norms.append([])
+        for name, param in model.named_parameters():
+            norms[-1].append(torch.linalg.norm(param).detach().numpy())
+            # if param.requires_grad:
+            #     if (ckpt == ckpts[0]):
+            #         weights[name] = [param.data]
+            #     else:
+            #         weights[name].append(param.data)
+            # print(name, param.data)
+
+        plt.hist(norms[-1], bins=120)
+        plt.title(f'Distribution of weight norm for checkpoint {2**i}')
+        plt.show()
 
         sigma = get_saturation(model, model.train_dataloader())
-        results = {}
-        results[ckpt] = sigma
-        pickle.dump(results, open(f"results/results_SD-{i}.pkl", "wb"))
+        # results = {}
+        # results[ckpt] = sigma
+        results.append(sigma.item())
+        # print(results)
+        # pickle.dump(results, open(f"results/results_SD-{i}.pkl", "wb"))
+    
+    plt.plot([2**i for i in range(18)], results)
+    plt.xscale('log')
+    plt.title(r'Saturation over time (Addition $mod 97$)')
+    plt.show()
+
+    # for i in range(17):
+    #     plt.hist(norms[i])
+    #     plt.title(f'Distribution of Norm weight for checkpoint {2**i}')
+    #     plt.show()
+
+    # for k, v in weights.items():
+    #     for i, dist in enumerate(v):
+    #         plt.plot()
+    #         plt.title(f'Weight distribution of {k} for epoch={2**i}')
+    #         plt.show()
+            
+
+    
+
 
 def compute_sharpness(hparams: Namespace, ckpts) -> None:
     """
