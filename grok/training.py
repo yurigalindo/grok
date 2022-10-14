@@ -813,7 +813,13 @@ def compute_saturation(hparams: Namespace, ckpts)-> None:
     trainer = Trainer(**trainer_args)
 
     results = []
-    norms = []
+    fig1, axs1 = plt.subplots(3, 6, figsize=(15, 10))
+    fig1.suptitle('transformer.decoder.blocks.0.ffn.ffn.0.weights')
+    fig2, axs2 = plt.subplots(3, 6, figsize=(15, 10))
+    fig2.suptitle('transformer.decoder.blocks.1.ffn.ffn.0.weights')
+    fig3, axs3 = plt.subplots(3, 6, figsize=(15, 10))
+    fig3.suptitle('transformer.decoder.blocks.1.ffn.ffn.2.weights')
+    ax = [axs1, axs2, axs3]
     for i, ckpt in enumerate(ckpts):
         print(f"Loading checkpoint {ckpt}")
         # model = torch.load(ckpt)
@@ -830,19 +836,23 @@ def compute_saturation(hparams: Namespace, ckpts)-> None:
         model = TrainableTransformer(hps).float()
         model.load_state_dict(checkpoint["state_dict"])
         
-        norms.append([])
+        norms = {'ffn00': [], 'ffn10': [], 'ffn11': []}
         for name, param in model.named_parameters():
-            norms[-1].append(torch.linalg.norm(param).detach().numpy())
-            # if param.requires_grad:
-            #     if (ckpt == ckpts[0]):
-            #         weights[name] = [param.data]
-            #     else:
-            #         weights[name].append(param.data)
-            # print(name, param.data)
+            print(name, param.shape)
+            if (name == 'transformer.decoder.blocks.0.ffn.ffn.0.weight'): # track 1st layer of 1st decoder block
+                for neuron in range(param.shape[0]):
+                    norms['ffn00'].append(torch.linalg.norm(param[neuron, :]).detach().numpy())
+            elif (name == 'transformer.decoder.blocks.1.ffn.ffn.0.weight'): # track 1st layer of 2nd decoder block
+                for neuron in range(param.shape[0]):
+                    norms['ffn10'].append(torch.linalg.norm(param[neuron, :]).detach().numpy())
+            elif (name == 'transformer.decoder.blocks.1.ffn.ffn.2.weight'): # track 2nd layer of 2nd decoder block (preclassifier block)
+                for neuron in range(param.shape[0]):
+                    norms['ffn11'].append(torch.linalg.norm(param[neuron, :]).detach().numpy())
+            
 
-        plt.hist(norms[-1], bins=120)
-        plt.title(f'Distribution of weight norm for checkpoint {2**i}')
-        plt.show()
+        for idx, k in enumerate(norms.keys()):
+            ax[idx][i // 6, i % 6].hist(norms[k], bins=len(norms[k]), label=f'{k}_{2**i}')
+            ax[idx][i // 6, i % 6].set_title(f'{2**i}')
 
         sigma = get_saturation(model, model.train_dataloader())
         # results = {}
@@ -850,23 +860,20 @@ def compute_saturation(hparams: Namespace, ckpts)-> None:
         results.append(sigma.item())
         # print(results)
         # pickle.dump(results, open(f"results/results_SD-{i}.pkl", "wb"))
+
+    fig1.savefig(f'{list(norms.keys())[0]}_distr_over_time.pdf')
+    fig1.show()
+    fig2.savefig(f'{list(norms.keys())[1]}_distr_over_time.pdf')
+    fig2.show()
+    fig3.savefig(f'{list(norms.keys())[2]}_distr_over_time.pdf')
+    fig3.show()
     
-    plt.plot([2**i for i in range(18)], results)
-    plt.xscale('log')
-    plt.title(r'Saturation over time (Addition $mod 97$)')
-    plt.show()
 
-    # for i in range(17):
-    #     plt.hist(norms[i])
-    #     plt.title(f'Distribution of Norm weight for checkpoint {2**i}')
-    #     plt.show()
-
-    # for k, v in weights.items():
-    #     for i, dist in enumerate(v):
-    #         plt.plot()
-    #         plt.title(f'Weight distribution of {k} for epoch={2**i}')
-    #         plt.show()
-            
+    # plt.plot([2**i for i in range(18)], results, marker='o')
+    # plt.xscale('log')
+    # plt.title(r'Saturation over time (Addition $mod 97$)')
+    # plt.savefig('global_saturation_add97.pdf')
+    # plt.show()        
 
     
 
