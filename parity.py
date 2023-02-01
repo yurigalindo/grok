@@ -97,7 +97,6 @@ def main():
                 if (test_acc[-1] > 0.98 and gen_epochs[-1] < 0):
                     print(f'Saving initially generalizing model - epoch {epoch}')
                     torch.save(model.state_dict(), os.path.join(path, 'initial_generalization.pt'))
-                    gen_epochs[-1] = epoch
                 if (epoch == args.epochs - 1):
                     print(f'Saving (final) generalizing model - epoch {epoch}')
                     torch.save(model.state_dict(), os.path.join(path, 'generalization.pt'))
@@ -258,25 +257,85 @@ def main():
     plt.close()
 
     # Subnetworks calculations & reconstruction accuracy
-    # for seed_id in range(args.n_seeds):
-    #     sparsity = []
-    #     path = os.path.join(base_dir, f'seed{seed_id}_checkpoints')
-    #     train_dataloader, _ = data_preparation(args, seed_id) # load the training dataset of that seed_id
-    # mem_model = FF1().to(device)
-    # mem_model.load_state_dict(torch.load(os.path.join(path, f'memorization.pt')))
-    # mem_size, mem_idx = circuit_discovery_linear(epoch, mem_model, normss[seed_id], train_dataloader, device)
-    # print(f'Memorizing circuit has size equal to {mem_size}')
+    mem_accs, gen_accs = {'train': [], 'test': []}, {'train': [], 'test': []}
+    for seed_id in range(args.n_seeds):
+        path = os.path.join(base_dir, f'seed{seed_id}_checkpoints')
+        train_dataloader, test_dataloader = data_preparation(args, seed_id) # load the training dataset of that seed_id
 
-    # init_gen_model = FF1().to(device)
-    # init_gen_model.load_state_dict(torch.load(os.path.join(path, f'initial_generalization.pt')))
-    # init_gen_size, init_gen_idx = circuit_discovery_linear(epoch, init_gen_model, normss[seed_id], train_dataloader, device)
-    # print(f'Initial generalizing circuit has size equal to {mem_size}')
+        mem_model = FF1().to(device)
+        mem_model.load_state_dict(torch.load(os.path.join(path, f'memorization.pt')))
+        mem_size, mem_idx = circuit_discovery_linear(mem_epochs[seed_id], mem_model, normss[seed_id], train_dataloader, device)
+        print(f'Memorizing circuit has size equal to {mem_size} with neurons {mem_idx}')
 
-    # gen_model = FF1().to(device)
-    # gen_model.load_state_dict(torch.load(os.path.join(path, f'generalization.pt')))
-    # mem_size, mem_idx = circuit_discovery_linear(epoch, _model, normss[seed_id], train_dataloader, device)
-    # print(f'Memorizing circuit has size equal to {mem_size}')
+        # init_gen_model = FF1().to(device)
+        # init_gen_model.load_state_dict(torch.load(os.path.join(path, f'initial_generalization.pt')))
+        # init_gen_size, init_gen_idx = circuit_discovery_linear(epoch, init_gen_model, normss[seed_id], train_dataloader, device)
+        # print(f'Initial generalizing circuit has size equal to {init_gen_size}')
 
+        gen_model = FF1().to(device)
+        gen_model.load_state_dict(torch.load(os.path.join(path, f'generalization.pt')))
+        gen_size, gen_idx = circuit_discovery_linear(gen_epochs[seed_id], gen_model, normss[seed_id], train_dataloader, device)
+        print(f'Generalizing (final) circuit has size equal to {gen_size} with neurons {gen_idx}')
+
+        mem_train_acc, mem_test_acc, gen_train_acc, gen_test_acc = [], [], [], []
+        # masked inference for the two sets of indices
+        for epoch in range(args.epochs):
+            _model = FF1().to(device)
+            _model.load_state_dict(torch.load(os.path.join(path, f'model_{epoch}.pt')))
+
+            _mem_circuit_acc = acc_calc(train_dataloader, _model, mem_idx, device=device)
+            mem_train_acc.append(_mem_circuit_acc)
+            _mem_circuit_acc = acc_calc(test_dataloader, _model, mem_idx, device=device)
+            mem_test_acc.append(_mem_circuit_acc)
+
+            _gen_circuit_acc = acc_calc(train_dataloader, _model, gen_idx, device=device)
+            gen_train_acc.append(_gen_circuit_acc)
+            _gen_circuit_acc = acc_calc(test_dataloader, _model, gen_idx, device=device)
+            gen_test_acc.append(_gen_circuit_acc)
+        
+        mem_accs['train'].append(mem_train_acc)
+        mem_accs['test'].append(mem_test_acc)
+        gen_accs['train'].append(gen_train_acc)
+        gen_accs['test'].append(gen_test_acc)
+
+
+    mean_mem_train_acc, std_mem_train_acc = mean_and_std_across_seeds(mem_accs['train'])
+    np.save(os.path.join(base_dir, 'mean_mem_train_acc'), mean_mem_train_acc)
+    np.save(os.path.join(base_dir, 'std_mem_train_acc'), std_mem_train_acc)
+
+    mean_mem_test_acc, std_mem_test_acc = mean_and_std_across_seeds(mem_accs['test'])
+    np.save(os.path.join(base_dir, 'mean_mem_test_acc'), mean_mem_test_acc)
+    np.save(os.path.join(base_dir, 'std_mem_test_acc'), std_mem_test_acc)
+
+    mean_gen_train_acc, std_gen_train_acc = mean_and_std_across_seeds(gen_accs['train'])
+    np.save(os.path.join(base_dir, 'mean_gen_train_acc'), mean_gen_train_acc)
+    np.save(os.path.join(base_dir, 'std_gen_train_acc'), std_mem_train_acc)
+
+    mean_gen_test_acc, std_gen_test_acc = mean_and_std_across_seeds(gen_accs['test'])
+    np.save(os.path.join(base_dir, 'mean_gen_test_acc'), mean_gen_test_acc)
+    np.save(os.path.join(base_dir, 'std_gen_test_acc'), std_gen_test_acc)
+
+    plt.plot([i for i in range(args.epochs)], mean_mem_train_acc, linestyle='-', label='memorizing subnetwork', color='navy')
+    plt.fill_between([i for i in range(args.epochs)], mean_mem_train_acc - std_mem_train_acc, mean_mem_train_acc + std_mem_train_acc, alpha = 0.3, color='navy')
+    plt.plot([i for i in range(args.epochs)], mean_gen_train_acc, linestyle='-', label='generalizing subnetwork', color='crimson')
+    plt.fill_between([i for i in range(args.epochs)], mean_gen_train_acc - std_gen_train_acc, mean_gen_train_acc + std_gen_train_acc, alpha = 0.3, color='crimson')
+    plt.title('Subnetwork Train Accuracy')
+    plt.xlabel('epochs')
+    plt.xscale('log')
+    plt.legend()
+    plt.savefig(os.path.join(fig_path, 'subnetwork_train_acc.pdf'))
+    plt.close()
+
+    plt.plot([i for i in range(args.epochs)], mean_mem_test_acc, linestyle='-', label='memorizing subnetwork', color='navy')
+    plt.fill_between([i for i in range(args.epochs)], mean_mem_test_acc - std_mem_test_acc, mean_mem_test_acc + std_mem_test_acc, alpha = 0.3, color='navy')
+    plt.plot([i for i in range(args.epochs)], mean_gen_train_acc, linestyle='-', label='generalizing subnetwork', color='crimson')
+    plt.fill_between([i for i in range(args.epochs)], mean_gen_test_acc - std_gen_test_acc, mean_gen_test_acc + std_gen_test_acc, alpha = 0.3, color='crimson')
+    plt.title('Subnetwork Test Accuracy')
+    plt.xlabel('epochs')
+    plt.xscale('log')
+    plt.legend()
+    plt.savefig(os.path.join(fig_path, 'subnetwork_test_acc.pdf'))
+    plt.close()
 
 if __name__ == '__main__':
     main()
