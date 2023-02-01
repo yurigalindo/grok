@@ -38,6 +38,7 @@ def get_args():
     parser.add_argument('--width', default=1000, type=int, help='width of network')
     parser.add_argument('--n_seeds', default=5, type=int, help='number of random seeds')
     parser.add_argument('--train', action='store_true', help='train models')
+    parser.add_argument('--sparsity-sampling', default=10, help='every how many epochs we compute the sparsity of the network')
     
     return parser.parse_args()
 
@@ -88,13 +89,17 @@ def main():
                 train_acc.append(acc_calc(train_dataloader, model))
                 test_acc.append(acc_calc(test_dataloader, model))
 
-                # Check whether it is 1st occurence of memorization/generalization
+                # Save memorizing / generalizing network
                 if (train_acc[-1] > 0.98 and mem_epochs[-1] < 0):
                     print(f'Saving memorizing model - epoch {epoch}')
                     torch.save(model.state_dict(), os.path.join(path, 'memorization.pt'))
                     mem_epochs[-1] = epoch
                 if (test_acc[-1] > 0.98 and gen_epochs[-1] < 0):
-                    print(f'Saving generalizing model - epoch {epoch}')
+                    print(f'Saving initially generalizing model - epoch {epoch}')
+                    torch.save(model.state_dict(), os.path.join(path, 'initial_generalization.pt'))
+                    gen_epochs[-1] = epoch
+                if (epoch == args.epochs - 1):
+                    print(f'Saving (final) generalizing model - epoch {epoch}')
                     torch.save(model.state_dict(), os.path.join(path, 'generalization.pt'))
                     gen_epochs[-1] = epoch
 
@@ -171,13 +176,13 @@ def main():
 
     else:
         with open(os.path.join(base_dir, 'normss'), "rb") as fp:
-            normss = picle.load(fp)
+            normss = pickle.load(fp)
 
         with open(os.path.join(base_dir, 'mem_epochs'), "rb") as fp:
-            mem_epochs = picle.load(fp)
+            mem_epochs = pickle.load(fp)
 
         with open(os.path.join(base_dir, 'gen_epochs'), "rb") as fp:
-            gen_epochs = picle.load(fp)
+            gen_epochs = pickle.load(fp)
 
 
     # Show norm evolutions
@@ -218,20 +223,23 @@ def main():
         plt.close()
 
 
-    # Sparsity & subcircuit discovery
+    # Global sparsity over time
     sparsities = []
     for seed_id in range(args.n_seeds):
         sparsity = []
         path = os.path.join(base_dir, f'seed{seed_id}_checkpoints')
-        train_dataloader, test_dataloader = data_preparation(args, seed_id) # load the training dataset of that seed_id
-        for epoch in range(args.epochs):
+        train_dataloader, _ = data_preparation(args, seed_id) # load the training dataset of that seed_id
+        for epoch in range(0, args.epochs, args.sparsity_sampling):
             _model = FF1().to(device)
             _model.load_state_dict(torch.load(os.path.join(path, f'model_{epoch}.pt')))
             if (epoch < 20):
                 # warm up for irregular behavior in the beginning - non monotonic accuracy (pruning helps apparently?)
-                size, _ = circuit_discovery_linear(epoch, _model, normss[seed_id], train_dataloader)
+                size, _ = circuit_discovery_linear(epoch, _model, normss[seed_id], train_dataloader, device)
             else:
-                size, _ = circuit_discovery_binary(epoch, _model, normss[seed_id], train_dataloader)
+                size, _ = circuit_discovery_binary(epoch, _model, normss[seed_id], train_dataloader, device)
+                if (size == float('inf')): 
+                    # binary search failed?!
+                    size, _ = circuit_discovery_linear(epoch, _model, normss[seed_id], train_dataloader, device)
 
             sparsity.append(size)
         sparsities.append(sparsity)
@@ -240,14 +248,35 @@ def main():
     np.save(os.path.join(base_dir, 'mean_sparsity_over_time'), mean_sparsity)
     np.save(os.path.join(base_dir, 'std_sparsity_over_time'), std_sparsity)
 
-    plt.plot(mean_sparsity, linestyle='-')
-    plt.fill_between([i for i in range(args.epochs)], mean_sparsity - std_sparsity, mean_sparsity + std_sparsity, alpha = 0.3)
+    plt.plot([i for i in range(0, args.epochs, args.sparsity_sampling)], mean_sparsity, linestyle='-')
+    plt.fill_between([i for i in range(0, args.epochs, args.sparsity_sampling)], mean_sparsity - std_sparsity, mean_sparsity + std_sparsity, alpha = 0.3)
     plt.title('Sparsity of network')
     plt.xlabel('epochs')
     plt.ylabel('#neurons')
     plt.xscale('log')
     plt.savefig(os.path.join(fig_path, 'sparsity.pdf'))
     plt.close()
+
+    # Subnetworks calculations & reconstruction accuracy
+    # for seed_id in range(args.n_seeds):
+    #     sparsity = []
+    #     path = os.path.join(base_dir, f'seed{seed_id}_checkpoints')
+    #     train_dataloader, _ = data_preparation(args, seed_id) # load the training dataset of that seed_id
+    # mem_model = FF1().to(device)
+    # mem_model.load_state_dict(torch.load(os.path.join(path, f'memorization.pt')))
+    # mem_size, mem_idx = circuit_discovery_linear(epoch, mem_model, normss[seed_id], train_dataloader, device)
+    # print(f'Memorizing circuit has size equal to {mem_size}')
+
+    # init_gen_model = FF1().to(device)
+    # init_gen_model.load_state_dict(torch.load(os.path.join(path, f'initial_generalization.pt')))
+    # init_gen_size, init_gen_idx = circuit_discovery_linear(epoch, init_gen_model, normss[seed_id], train_dataloader, device)
+    # print(f'Initial generalizing circuit has size equal to {mem_size}')
+
+    # gen_model = FF1().to(device)
+    # gen_model.load_state_dict(torch.load(os.path.join(path, f'generalization.pt')))
+    # mem_size, mem_idx = circuit_discovery_linear(epoch, _model, normss[seed_id], train_dataloader, device)
+    # print(f'Memorizing circuit has size equal to {mem_size}')
+
 
 if __name__ == '__main__':
     main()

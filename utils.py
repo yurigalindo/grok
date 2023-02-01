@@ -55,14 +55,14 @@ def loss_calc(dataloader, model, loss_fn, device='cuda'):
 
     return loss / total
 
-def circuit_discovery_linear(epoch, saved_model, norms, dataloader):
+def circuit_discovery_linear(epoch, saved_model, norms, dataloader, device='cuda'):
     # Calculate least number of neurons that recovers original (train set) performance with linear search
 
     values = np.array(norms['feats'][epoch]).argsort()
     for k in range(1, 1000):
         idx = values[-k:]
-        masked_acc = acc_calc(dataloader, saved_model, idx)
-        full_acc = acc_calc(dataloader, saved_model)
+        masked_acc = acc_calc(dataloader, saved_model, idx, device=device)
+        full_acc = acc_calc(dataloader, saved_model, device=device)
 
         if (masked_acc == full_acc):
             return k, idx
@@ -71,7 +71,7 @@ def circuit_discovery_linear(epoch, saved_model, norms, dataloader):
     
     
 
-def circuit_discovery_binary(epoch, saved_model, norms, dataloader):
+def circuit_discovery_binary(epoch, saved_model, norms, dataloader, device='cuda'):
     # Calculate least number of neurons that recovers original (train set) performance with binary search (assuming that it increases monotonically)
     
     left, right = 1, 1000
@@ -85,8 +85,8 @@ def circuit_discovery_binary(epoch, saved_model, norms, dataloader):
             break
 
         idx = values[-k:]
-        masked_acc = acc_calc(dataloader, saved_model, idx)
-        full_acc = acc_calc(dataloader, saved_model)
+        masked_acc = acc_calc(dataloader, saved_model, idx, device=device)
+        full_acc = acc_calc(dataloader, saved_model, device=device)
 
         if (masked_acc == full_acc) and (k < min_k):
             min_k = k
