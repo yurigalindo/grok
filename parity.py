@@ -14,16 +14,18 @@ from utils import *
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-def data_preparation(args, seed_id=42, test_samples=100, test_batchsize=100):
+def data_preparation(args, seed_id=42, test_samples=100, test_batchsize=100, return_raw=False):
     # Data generation - different seed each time
-    data = parity(args.n, args.k, args.N, seed=seed_id*17)
-    train_dataset = TensorDataset(data[0], data[1])
+    _data = parity(args.n, args.k, args.N, seed=seed_id*17)
+    train_dataset = TensorDataset(_data[0], _data[1])
     train_dataloader = DataLoader(train_dataset, batch_size=args.B, shuffle=True)
 
-    data = parity(args.n, args.k, test_samples, seed=2001) # fixed test samples
+    data = parity(args.n, args.k, test_samples, seed=2001) # constant test samples
     test_dataset = TensorDataset(data[0], data[1])
     test_dataloader = DataLoader(test_dataset, batch_size=test_batchsize, shuffle=True)
 
+    if (return_raw):
+        return train_dataloader, train_dataloader, _data[0][:100], data[0]
     return train_dataloader, test_dataloader
 
 def get_args():
@@ -38,7 +40,12 @@ def get_args():
     parser.add_argument('--width', default=1000, type=int, help='width of network')
     parser.add_argument('--n_seeds', default=5, type=int, help='number of random seeds')
     parser.add_argument('--train', action='store_true', help='train models')
-    parser.add_argument('--sparsity-sampling', default=10, help='every how many epochs we compute the sparsity of the network')
+    parser.add_argument('--ind-norms', action='store_true', help='plot individual neurons norm')
+    parser.add_argument('--global-sparsity', action='store_true', help='compute and plot global sparsity of network over time')
+    parser.add_argument('--subnetworks', action='store_true', help='compute and plot subnetworks quantities')
+    parser.add_argument('--sparsity-sampling', default=10, help='every how many epochs we compute the global sparsity of the network')
+    parser.add_argument('--arity', action='store_true', help='compute and plot arity of network over time')
+    parser.add_argument('--faithfulness', action='store_true', help='compute faithfulness instead of accuracy for subnetworks')
     
     return parser.parse_args()
 
@@ -94,9 +101,9 @@ def main():
                     print(f'Saving memorizing model - epoch {epoch}')
                     torch.save(model.state_dict(), os.path.join(path, 'memorization.pt'))
                     mem_epochs[-1] = epoch
-                if (test_acc[-1] > 0.98 and gen_epochs[-1] < 0):
-                    print(f'Saving initially generalizing model - epoch {epoch}')
-                    torch.save(model.state_dict(), os.path.join(path, 'initial_generalization.pt'))
+                # if (test_acc[-1] > 0.98 and gen_epochs[-1] < 0):
+                #     print(f'Saving initially generalizing model - epoch {epoch}')
+                #     torch.save(model.state_dict(), os.path.join(path, 'initial_generalization.pt'))
                 if (epoch == args.epochs - 1):
                     print(f'Saving (final) generalizing model - epoch {epoch}')
                     torch.save(model.state_dict(), os.path.join(path, 'generalization.pt'))
@@ -184,158 +191,423 @@ def main():
             gen_epochs = pickle.load(fp)
 
 
-    # Show norm evolutions
-    for seed_id in range(args.n_seeds):
-        best = normss[seed_id]['feats'][gen_epochs[seed_id]].argmax()
-        prev_best = normss[seed_id]['feats'][mem_epochs[seed_id]].argmax()
+    if args.ind_norms:
+        # Show norm evolutions
+        for seed_id in range(args.n_seeds):
+            best = normss[seed_id]['feats'][gen_epochs[seed_id]].argmax()
+            prev_best = normss[seed_id]['feats'][mem_epochs[seed_id]].argmax()
 
-        traj, prev_traj = [], []
-        for k in range(args.epochs):
-            traj.append(normss[seed_id]['feats'][k][best])
-            prev_traj.append(normss[seed_id]['feats'][k][prev_best])
-
-        plt.plot(traj, label='generalizing neuron', lw=2, color='crimson')
-        plt.plot(prev_traj, label='memorizing neuron', lw=2, color='navy')
-        plt.title(f'Norm evolution of neurons belonging to different circuits - seed {seed_id}')
-        plt.xscale('log')
-        plt.xlabel('epochs')
-        plt.ylabel(r'$\| w \|$')
-        plt.legend()
-        plt.savefig(os.path.join(fig_path, f'norm_contrast_seed{seed_id}.pdf'))
-        plt.show()
-        plt.close()
-
-        trajs = []
-        for neuron in range(args.width):
-            trajs.append([])
+            traj, prev_traj = [], []
             for k in range(args.epochs):
-                trajs[-1].append(normss[seed_id]['feats'][k][neuron])
+                traj.append(normss[seed_id]['feats'][k][best])
+                prev_traj.append(normss[seed_id]['feats'][k][prev_best])
 
-        for neuron in range(args.width):
-            plt.plot(trajs[neuron])
-        plt.title(f'Norm evolution of all neurons - seed {seed_id}')
+            plt.plot(traj, label='generalizing neuron', lw=2, color='crimson')
+            plt.plot(prev_traj, label='memorizing neuron', lw=2, color='navy')
+            plt.title(f'Norm evolution of neurons belonging to different circuits - seed {seed_id}')
+            plt.xscale('log')
+            plt.xlabel('epochs')
+            plt.ylabel(r'$\| w \|$')
+            plt.legend()
+            plt.savefig(os.path.join(fig_path, f'norm_contrast_seed{seed_id}.pdf'))
+            plt.show()
+            plt.close()
+
+            trajs = []
+            for neuron in range(args.width):
+                trajs.append([])
+                for k in range(args.epochs):
+                    trajs[-1].append(normss[seed_id]['feats'][k][neuron])
+
+            for neuron in range(args.width):
+                plt.plot(trajs[neuron])
+            plt.title(f'Norm evolution of all neurons - seed {seed_id}')
+            plt.xlabel('epochs')
+            plt.ylabel(r'$\| w \|$')
+            plt.xscale('log')
+            plt.savefig(os.path.join(fig_path, f'all_neurons_norm_seed{seed_id}.pdf'))
+            plt.show()
+            plt.close()
+
+
+    if args.global_sparsity:
+        # Global sparsity over time
+        sparsities = []
+        for seed_id in range(args.n_seeds):
+            sparsity = []
+            path = os.path.join(base_dir, f'seed{seed_id}_checkpoints')
+            train_dataloader, _ = data_preparation(args, seed_id) # load the training dataset of that seed_id
+            for epoch in range(100, args.epochs, args.sparsity_sampling):
+                _model = FF1(input_dim=args.n, width=args.width).to(device)
+                _model.load_state_dict(torch.load(os.path.join(path, f'model_{epoch}.pt')))
+                if (epoch < 20):
+                    # warm up for irregular behavior in the beginning - non monotonic accuracy (pruning helps apparently?)
+                    size, _ = circuit_discovery_linear(epoch, _model, normss[seed_id], train_dataloader, device, args=args)
+                else:
+                    size, _ = circuit_discovery_binary(epoch, _model, normss[seed_id], train_dataloader, device, args=args)
+                    if (size == float('inf')): 
+                        # binary search failed?!
+                        size, _ = circuit_discovery_linear(epoch, _model, normss[seed_id], train_dataloader, device, args=args)
+
+                sparsity.append(size)
+            sparsities.append(sparsity)
+
+        mean_sparsity, std_sparsity = mean_and_std_across_seeds(sparsities)
+        for i, x in enumerate(sparsities):
+            print(f'Seed {i} has sparsity', x)
+        exit()
+        np.save(os.path.join(base_dir, 'mean_sparsity_over_time'), mean_sparsity)
+        np.save(os.path.join(base_dir, 'std_sparsity_over_time'), std_sparsity)
+
+        plt.plot([i for i in range(0, args.epochs, args.sparsity_sampling)], mean_sparsity, linestyle='-')
+        plt.fill_between([i for i in range(0, args.epochs, args.sparsity_sampling)], mean_sparsity - std_sparsity, mean_sparsity + std_sparsity, alpha = 0.3)
+        plt.title('Sparsity of network')
         plt.xlabel('epochs')
-        plt.ylabel(r'$\| w \|$')
+        plt.ylabel('#neurons')
         plt.xscale('log')
-        plt.savefig(os.path.join(fig_path, f'all_neurons_norm_seed{seed_id}.pdf'))
-        plt.show()
+        plt.savefig(os.path.join(fig_path, 'sparsity.pdf'))
         plt.close()
 
 
-    # Global sparsity over time
-    sparsities = []
-    for seed_id in range(args.n_seeds):
-        sparsity = []
-        path = os.path.join(base_dir, f'seed{seed_id}_checkpoints')
-        train_dataloader, _ = data_preparation(args, seed_id) # load the training dataset of that seed_id
-        for epoch in range(0, args.epochs, args.sparsity_sampling):
-            _model = FF1().to(device)
-            _model.load_state_dict(torch.load(os.path.join(path, f'model_{epoch}.pt')))
-            if (epoch < 20):
-                # warm up for irregular behavior in the beginning - non monotonic accuracy (pruning helps apparently?)
-                size, _ = circuit_discovery_linear(epoch, _model, normss[seed_id], train_dataloader, device)
-            else:
-                size, _ = circuit_discovery_binary(epoch, _model, normss[seed_id], train_dataloader, device)
-                if (size == float('inf')): 
-                    # binary search failed?!
-                    size, _ = circuit_discovery_linear(epoch, _model, normss[seed_id], train_dataloader, device)
+    if args.subnetworks:
+        # Subnetworks calculations & reconstruction accuracy
+        mem_accs, gen_accs, mem_but_gen_accs, all_but_gen_accs, control_accs = {'train': [], 'test': []}, {'train': [], 'test': []}, {'train': [], 'test': []}, {'train': [], 'test': []}, {'train': [], 'test': []}
+        mem_sens, gen_sens, mem_but_gen_sens, all_but_gen_sens, control_sens = {'train': [], 'test': []}, {'train': [], 'test': []}, {'train': [], 'test': []}, {'train': [], 'test': []}, {'train': [], 'test': []}
+        mem_norms, gen_norms, mem_but_gen_norms, all_but_gen_norms, control_norms = [], [], [], [], []
+        for seed_id in range(args.n_seeds):
+            path = os.path.join(base_dir, f'seed{seed_id}_checkpoints')
+            train_dataloader, test_dataloader, train_samples, test_samples = data_preparation(args, seed_id, return_raw=True) # load the training dataset of that seed_id
 
-            sparsity.append(size)
-        sparsities.append(sparsity)
+            mem_model = FF1(input_dim=args.n, width=args.width).to(device)
+            mem_model.load_state_dict(torch.load(os.path.join(path, f'memorization.pt')))
+            mem_size, mem_idx = circuit_discovery_linear(mem_epochs[seed_id], mem_model, normss[seed_id], train_dataloader, device, args=args)
+            print(f'Memorizing circuit has size equal to {mem_size} with neurons {mem_idx}')
 
-    mean_sparsity, std_sparsity = mean_and_std_across_seeds(sparsities)
-    np.save(os.path.join(base_dir, 'mean_sparsity_over_time'), mean_sparsity)
-    np.save(os.path.join(base_dir, 'std_sparsity_over_time'), std_sparsity)
+            # init_gen_model = FF1(input_dim=args.n, width=args.width).to(device)
+            # init_gen_model.load_state_dict(torch.load(os.path.join(path, f'initial_generalization.pt')))
+            # init_gen_size, init_gen_idx = circuit_discovery_linear(epoch, init_gen_model, normss[seed_id], train_dataloader, device, args=args)
+            # print(f'Initial generalizing circuit has size equal to {init_gen_size}')
 
-    plt.plot([i for i in range(0, args.epochs, args.sparsity_sampling)], mean_sparsity, linestyle='-')
-    plt.fill_between([i for i in range(0, args.epochs, args.sparsity_sampling)], mean_sparsity - std_sparsity, mean_sparsity + std_sparsity, alpha = 0.3)
-    plt.title('Sparsity of network')
-    plt.xlabel('epochs')
-    plt.ylabel('#neurons')
-    plt.xscale('log')
-    plt.savefig(os.path.join(fig_path, 'sparsity.pdf'))
-    plt.close()
+            gen_model = FF1(input_dim=args.n, width=args.width).to(device)
+            gen_model.load_state_dict(torch.load(os.path.join(path, f'generalization.pt')))
+            gen_size, gen_idx = circuit_discovery_linear(gen_epochs[seed_id], gen_model, normss[seed_id], train_dataloader, device, args=args)
+            print(f'Generalizing (final) circuit has size equal to {gen_size} with neurons {gen_idx}')
 
-    # Subnetworks calculations & reconstruction accuracy
-    mem_accs, gen_accs = {'train': [], 'test': []}, {'train': [], 'test': []}
-    for seed_id in range(args.n_seeds):
-        path = os.path.join(base_dir, f'seed{seed_id}_checkpoints')
-        train_dataloader, test_dataloader = data_preparation(args, seed_id) # load the training dataset of that seed_id
+            mem_but_gen_idx = list(set(mem_idx) - set(gen_idx))
+            all_but_gen_idx = list(set([i for i in range(args.width)]) - set(gen_idx))
 
-        mem_model = FF1().to(device)
-        mem_model.load_state_dict(torch.load(os.path.join(path, f'memorization.pt')))
-        mem_size, mem_idx = circuit_discovery_linear(mem_epochs[seed_id], mem_model, normss[seed_id], train_dataloader, device)
-        print(f'Memorizing circuit has size equal to {mem_size} with neurons {mem_idx}')
+            random.seed(seed_id)
+            control_idx = random.sample(range(args.width), k=gen_size)
 
-        # init_gen_model = FF1().to(device)
-        # init_gen_model.load_state_dict(torch.load(os.path.join(path, f'initial_generalization.pt')))
-        # init_gen_size, init_gen_idx = circuit_discovery_linear(epoch, init_gen_model, normss[seed_id], train_dataloader, device)
-        # print(f'Initial generalizing circuit has size equal to {init_gen_size}')
+            mem_train_acc, mem_test_acc, gen_train_acc, gen_test_acc, mem_but_gen_train_acc, mem_but_gen_test_acc , all_but_gen_train_acc, all_but_gen_test_acc, control_train_acc, control_test_acc = [], [], [], [], [], [], [], [], [], []
+            mem_train_sens, mem_test_sens, gen_train_sens, gen_test_sens, mem_but_gen_train_sens, mem_but_gen_test_sens , all_but_gen_train_sens, all_but_gen_test_sens, control_train_sens, control_test_sens = [], [], [], [], [], [], [], [], [], []
+            mem_norm, gen_norm, mem_but_gen_norm, all_but_gen_norm, control_norm = [], [], [], [], []
+            # masked inference for the different sets of indices
+            for epoch in range(args.epochs):
+                _model = FF1(input_dim=args.n, width=args.width).to(device)
+                _model.load_state_dict(torch.load(os.path.join(path, f'model_{epoch}.pt')))
+                neurons = list(_model.parameters())[0]
 
-        gen_model = FF1().to(device)
-        gen_model.load_state_dict(torch.load(os.path.join(path, f'generalization.pt')))
-        gen_size, gen_idx = circuit_discovery_linear(gen_epochs[seed_id], gen_model, normss[seed_id], train_dataloader, device)
-        print(f'Generalizing (final) circuit has size equal to {gen_size} with neurons {gen_idx}')
+                # mem_train_acc.append(acc_calc(train_dataloader, _model, mem_idx, device=device, args=args, faithfulness=args.faithfulness))
+                # mem_test_acc.append(acc_calc(test_dataloader, _model, mem_idx, device=device, args=args, faithfulness=args.faithfulness))
+                # mem_norm.append(torch.linalg.norm(neurons[mem_idx], dim=1).detach().cpu().numpy().mean())
+                # mem_train_sens.append(sensitivity_calc(train_samples, _model, mem_idx, device=device, args=args))
+                # mem_test_sens.append(sensitivity_calc(test_samples, _model, mem_idx, device=device, args=args))
 
-        mem_train_acc, mem_test_acc, gen_train_acc, gen_test_acc = [], [], [], []
-        # masked inference for the two sets of indices
-        for epoch in range(args.epochs):
-            _model = FF1().to(device)
-            _model.load_state_dict(torch.load(os.path.join(path, f'model_{epoch}.pt')))
+                gen_train_acc.append(acc_calc(train_dataloader, _model, gen_idx, device=device, args=args, faithfulness=args.faithfulness))
+                gen_test_acc.append(acc_calc(test_dataloader, _model, gen_idx, device=device, args=args, faithfulness=args.faithfulness))
+                # gen_norm.append(torch.linalg.norm(neurons[gen_idx], dim=1).detach().cpu().numpy().mean())
+                # gen_train_sens.append(sensitivity_calc(train_samples, _model, gen_idx, device=device, args=args))
+                # gen_test_sens.append(sensitivity_calc(test_samples, _model, gen_idx, device=device, args=args))
 
-            _mem_circuit_acc = acc_calc(train_dataloader, _model, mem_idx, device=device)
-            mem_train_acc.append(_mem_circuit_acc)
-            _mem_circuit_acc = acc_calc(test_dataloader, _model, mem_idx, device=device)
-            mem_test_acc.append(_mem_circuit_acc)
+                # mem_but_gen_train_acc.append(acc_calc(train_dataloader, _model, mem_but_gen_idx, device=device, args=args))
+                # mem_but_gen_test_acc.append(acc_calc(test_dataloader, _model, mem_but_gen_idx, device=device, args=args))
+                # mem_but_gen_norm.append(torch.linalg.norm(neurons[mem_but_gen_idx], dim=1).detach().cpu().numpy().mean())
+                # mem_but_gen_train_sens.append(sensitivity_calc(train_samples, _model, mem_but_gen_idx, device=device, args=args))
+                # mem_but_gen_test_sens.append(sensitivity_calc(test_samples, _model, mem_but_gen_idx, device=device, args=args))
 
-            _gen_circuit_acc = acc_calc(train_dataloader, _model, gen_idx, device=device)
-            gen_train_acc.append(_gen_circuit_acc)
-            _gen_circuit_acc = acc_calc(test_dataloader, _model, gen_idx, device=device)
-            gen_test_acc.append(_gen_circuit_acc)
+                all_but_gen_train_acc.append(acc_calc(train_dataloader, _model, all_but_gen_idx, device=device, args=args, faithfulness=args.faithfulness))
+                all_but_gen_test_acc.append(acc_calc(test_dataloader, _model, all_but_gen_idx, device=device, args=args, faithfulness=args.faithfulness))
+                # all_but_gen_norm.append(torch.linalg.norm(neurons[all_but_gen_idx], dim=1).detach().cpu().numpy().mean())
+                # all_but_gen_train_sens.append(sensitivity_calc(train_samples, _model, all_but_gen_idx, device=device, args=args))
+                # all_but_gen_test_sens.append(sensitivity_calc(test_samples, _model, all_but_gen_idx, device=device, args=args))
+
+                control_train_acc.append(acc_calc(train_dataloader, _model, control_idx, device=device, args=args, faithfulness=args.faithfulness))
+                control_test_acc.append(acc_calc(test_dataloader, _model, control_idx, device=device, args=args, faithfulness=args.faithfulness))
+                # control_norm.append(torch.linalg.norm(neurons[control_idx], dim=1).detach().cpu().numpy().mean())
+                # control_train_sens.append(sensitivity_calc(train_samples, _model, control_idx, device=device, args=args))
+                # control_test_sens.append(sensitivity_calc(test_samples, _model, control_idx, device=device, args=args))
+
+            
+            # mem_accs['train'].append(mem_train_acc)
+            # mem_accs['test'].append(mem_test_acc)
+            # mem_sens['train'].append(mem_train_sens)
+            # mem_sens['test'].append(mem_test_sens)
+            # mem_norms.append(mem_norm)
+
+            gen_accs['train'].append(gen_train_acc)
+            gen_accs['test'].append(gen_test_acc)
+            # gen_norms.append(gen_norm)
+            # gen_sens['train'].append(gen_train_sens)
+            # gen_sens['test'].append(gen_test_sens)
+
+            # mem_but_gen_accs['train'].append(mem_but_gen_train_acc)
+            # mem_but_gen_accs['test'].append(mem_but_gen_test_acc)
+            # mem_but_gen_norms.append(mem_but_gen_norm)
+            # mem_but_gen_sens['train'].append(mem_but_gen_train_sens)
+            # mem_but_gen_sens['test'].append(mem_but_gen_test_sens)
+
+            all_but_gen_accs['train'].append(all_but_gen_train_acc)
+            all_but_gen_accs['test'].append(all_but_gen_test_acc)
+            # all_but_gen_norms.append(all_but_gen_norm)
+            # all_but_gen_sens['train'].append(all_but_gen_train_sens)
+            # all_but_gen_sens['test'].append(all_but_gen_test_sens)
+
+            control_accs['train'].append(control_train_acc)
+            control_accs['test'].append(control_test_acc)
+            # control_norms.append(control_norm)
+            # control_sens['train'].append(control_train_sens)
+            # control_sens['test'].append(control_test_sens)
+
+
+        # mean_mem_train_acc, std_mem_train_acc = mean_and_std_across_seeds(mem_accs['train'])
+        # np.save(os.path.join(base_dir, 'mean_mem_train_acc'), mean_mem_train_acc)
+        # np.save(os.path.join(base_dir, 'std_mem_train_acc'), std_mem_train_acc)
+
+        # mean_mem_test_acc, std_mem_test_acc = mean_and_std_across_seeds(mem_accs['test'])
+        # np.save(os.path.join(base_dir, 'mean_mem_test_acc'), mean_mem_test_acc)
+        # np.save(os.path.join(base_dir, 'std_mem_test_acc'), std_mem_test_acc)
+
+        mean_gen_train_acc, std_gen_train_acc = mean_and_std_across_seeds(gen_accs['train'])
+        np.save(os.path.join(base_dir, 'mean_gen_train_faith'), mean_gen_train_acc)
+        np.save(os.path.join(base_dir, 'std_gen_train_faith'), std_gen_train_acc)
+
+        mean_gen_test_acc, std_gen_test_acc = mean_and_std_across_seeds(gen_accs['test'])
+        np.save(os.path.join(base_dir, 'mean_gen_test_faith'), mean_gen_test_acc)
+        np.save(os.path.join(base_dir, 'std_gen_test_faith'), std_gen_test_acc)
+
+        # mean_mem_but_gen_train_acc, std_mem_but_gen_train_acc = mean_and_std_across_seeds(mem_but_gen_accs['train'])
+        # np.save(os.path.join(base_dir, 'mean_mem_but_gen_train_acc'), mean_mem_but_gen_train_acc)
+        # np.save(os.path.join(base_dir, 'std_mem_but_gen_train_acc'), std_mem_but_gen_train_acc)
+
+        # mean_mem_but_gen_test_acc, std_mem_but_gen_test_acc = mean_and_std_across_seeds(mem_but_gen_accs['test'])
+        # np.save(os.path.join(base_dir, 'mean_mem_but_gen_test_acc'), mean_mem_but_gen_test_acc)
+        # np.save(os.path.join(base_dir, 'std_mem_but_gen_test_acc'), std_mem_but_gen_test_acc)
+
+        mean_all_but_gen_train_acc, std_all_but_gen_train_acc = mean_and_std_across_seeds(all_but_gen_accs['train'])
+        np.save(os.path.join(base_dir, 'mean_all_but_gen_train_faith'), mean_all_but_gen_train_acc)
+        np.save(os.path.join(base_dir, 'std_all_but_gen_train_faith'), std_all_but_gen_train_acc)
+
+        mean_all_but_gen_test_acc, std_all_but_gen_test_acc = mean_and_std_across_seeds(all_but_gen_accs['test'])
+        np.save(os.path.join(base_dir, 'mean_all_but_gen_test_faith'), mean_all_but_gen_test_acc)
+        np.save(os.path.join(base_dir, 'std_all_but_gen_test_faith'), std_all_but_gen_test_acc)
+
+        mean_control_train_acc, std_control_train_acc = mean_and_std_across_seeds(control_accs['train'])
+        np.save(os.path.join(base_dir, 'mean_control_train_faith'), mean_control_train_acc)
+        np.save(os.path.join(base_dir, 'std_control_train_faith'), std_control_train_acc)
+
+        mean_control_test_acc, std_control_test_acc = mean_and_std_across_seeds(control_accs['test'])
+        np.save(os.path.join(base_dir, 'mean_control_test_faith'), mean_control_test_acc)
+        np.save(os.path.join(base_dir, 'std_control_test_faith'), std_control_test_acc)
+
+        # norms
+        # mean_mem_norm, std_mem_norm = mean_and_std_across_seeds(mem_norms)
+        # np.save(os.path.join(base_dir, 'mean_mem_norm'), mean_mem_norm)
+        # np.save(os.path.join(base_dir, 'std_mem_norm'), std_mem_norm)
+
+        # mean_gen_norm, std_gen_norm = mean_and_std_across_seeds(gen_norms)
+        # np.save(os.path.join(base_dir, 'mean_gen_norm'), mean_gen_norm)
+        # np.save(os.path.join(base_dir, 'std_gen_norm'), std_gen_norm)
+
+        # mean_mem_but_gen_norm, std_mem_but_gen_norm = mean_and_std_across_seeds(mem_but_gen_norms)
+        # np.save(os.path.join(base_dir, 'mean_mem_but_gen_norm'), mean_mem_but_gen_norm)
+        # np.save(os.path.join(base_dir, 'std_mem_but_gen_norm'), std_mem_but_gen_norm)
+
+        # mean_all_but_gen_norm, std_all_but_gen_norm = mean_and_std_across_seeds(all_but_gen_norms)
+        # np.save(os.path.join(base_dir, 'mean_all_but_gen_norm'), mean_all_but_gen_norm)
+        # np.save(os.path.join(base_dir, 'std_all_but_gen_norm'), std_all_but_gen_norm)
+
+        # mean_control_norm, std_control_norm = mean_and_std_across_seeds(control_norms)
+        # np.save(os.path.join(base_dir, 'mean_control_norm'), mean_control_norm)
+        # np.save(os.path.join(base_dir, 'std_control_norm'), std_control_norm)
+
+        # # sensitivity
+
+        # mean_mem_train_sens, std_mem_train_sens = mean_and_std_across_seeds(mem_sens['train'])
+        # np.save(os.path.join(base_dir, 'mean_mem_train_sens'), mean_mem_train_sens)
+        # np.save(os.path.join(base_dir, 'std_mem_train_sens'), std_mem_train_sens)
+
+        # mean_mem_test_sens, std_mem_test_sens = mean_and_std_across_seeds(mem_sens['test'])
+        # np.save(os.path.join(base_dir, 'mean_mem_test_sens'), mean_mem_test_sens)
+        # np.save(os.path.join(base_dir, 'std_mem_test_sens'), std_mem_test_sens)
+
+        # mean_gen_train_sens, std_gen_train_sens = mean_and_std_across_seeds(gen_sens['train'])
+        # np.save(os.path.join(base_dir, 'mean_gen_train_sens'), mean_gen_train_sens)
+        # np.save(os.path.join(base_dir, 'std_gen_train_sens'), std_gen_train_sens)
+
+        # mean_gen_test_sens, std_gen_test_sens = mean_and_std_across_seeds(gen_sens['test'])
+        # np.save(os.path.join(base_dir, 'mean_gen_test_sens'), mean_gen_test_sens)
+        # np.save(os.path.join(base_dir, 'std_gen_test_sens'), std_gen_test_sens)
+
+        # mean_mem_but_gen_train_sens, std_mem_but_gen_train_sens = mean_and_std_across_seeds(mem_but_gen_sens['train'])
+        # np.save(os.path.join(base_dir, 'mean_mem_but_gen_train_sens'), mean_mem_but_gen_train_sens)
+        # np.save(os.path.join(base_dir, 'std_mem_but_gen_train_sens'), std_mem_but_gen_train_sens)
+
+        # mean_mem_but_gen_test_sens, std_mem_but_gen_test_sens = mean_and_std_across_seeds(mem_but_gen_sens['test'])
+        # np.save(os.path.join(base_dir, 'mean_mem_but_gen_test_sens'), mean_mem_but_gen_test_sens)
+        # np.save(os.path.join(base_dir, 'std_mem_but_gen_test_sens'), std_mem_but_gen_test_sens)
+
+        # mean_all_but_gen_train_sens, std_all_but_gen_train_sens = mean_and_std_across_seeds(all_but_gen_sens['train'])
+        # np.save(os.path.join(base_dir, 'mean_all_but_gen_train_sens'), mean_all_but_gen_train_sens)
+        # np.save(os.path.join(base_dir, 'std_all_but_gen_train_sens'), std_mem_but_gen_train_sens)
+
+        # mean_all_but_gen_test_sens, std_all_but_gen_test_sens = mean_and_std_across_seeds(all_but_gen_sens['test'])
+        # np.save(os.path.join(base_dir, 'mean_all_but_gen_test_sens'), mean_all_but_gen_test_sens)
+        # np.save(os.path.join(base_dir, 'std_all_but_gen_test_sens'), std_all_but_gen_test_sens)
+
+        # mean_control_train_sens, std_control_train_sens = mean_and_std_across_seeds(control_sens['train'])
+        # np.save(os.path.join(base_dir, 'mean_control_train_sens'), mean_control_train_sens)
+        # np.save(os.path.join(base_dir, 'std_control_train_sens'), std_control_train_sens)
+
+        # mean_control_test_sens, std_control_test_sens = mean_and_std_across_seeds(control_sens['test'])
+        # np.save(os.path.join(base_dir, 'mean_control_test_sens'), mean_control_test_sens)
+        # np.save(os.path.join(base_dir, 'std_control_test_sens'), std_control_test_sens)
+
         
-        mem_accs['train'].append(mem_train_acc)
-        mem_accs['test'].append(mem_test_acc)
-        gen_accs['train'].append(gen_train_acc)
-        gen_accs['test'].append(gen_test_acc)
+        # plt.plot([i for i in range(args.epochs)], mean_mem_train_acc, linestyle='-', label='memorizing subnetwork', color='navy')
+        # plt.fill_between([i for i in range(args.epochs)], mean_mem_train_acc - std_mem_train_acc, mean_mem_train_acc + std_mem_train_acc, alpha = 0.3, color='navy')
+        # plt.plot([i for i in range(args.epochs)], mean_mem_but_gen_train_acc, linestyle='-', label='disjoint memorizing subnetwork', color='forestgreen')
+        # plt.fill_between([i for i in range(args.epochs)], mean_mem_but_gen_train_acc - std_mem_but_gen_train_acc, mean_mem_but_gen_train_acc + std_mem_but_gen_train_acc, alpha = 0.3, color='forestgreen')
+        # plt.plot([i for i in range(args.epochs)], mean_gen_train_acc, linestyle='-', label='generalizing subnetwork', color='crimson')
+        # plt.fill_between([i for i in range(args.epochs)], mean_gen_train_acc - std_gen_train_acc, mean_gen_train_acc + std_gen_train_acc, alpha = 0.3, color='crimson')
+        # plt.plot([i for i in range(args.epochs)], mean_all_but_gen_train_acc, linestyle='-', label='complementary subnetwork', color='gold')
+        # plt.fill_between([i for i in range(args.epochs)], mean_all_but_gen_train_acc - std_all_but_gen_train_acc, mean_all_but_gen_train_acc + std_all_but_gen_train_acc, alpha = 0.3, color='gold')
+        # plt.plot([i for i in range(args.epochs)], mean_control_train_acc, linestyle='-', label='control subnetwork', color='deepskyblue')
+        # plt.fill_between([i for i in range(args.epochs)], mean_control_train_acc - std_control_train_acc, mean_control_train_acc + std_control_train_acc, alpha = 0.3, color='deepskyblue')
+        # plt.title('Subnetwork Train Accuracy')
+        # plt.xlabel('epochs')
+        # plt.xscale('log')
+        # plt.legend()
+        # plt.savefig(os.path.join(fig_path, 'subnetwork_train_acc.pdf'))
+        # plt.close()
+
+        # plt.plot([i for i in range(args.epochs)], mean_mem_test_acc, linestyle='-', label='memorizing subnetwork', color='navy')
+        # plt.fill_between([i for i in range(args.epochs)], mean_mem_test_acc - std_mem_test_acc, mean_mem_test_acc + std_mem_test_acc, alpha = 0.3, color='navy')
+        # plt.plot([i for i in range(args.epochs)], mean_mem_but_gen_test_acc, linestyle='-', label='disjoint memorizing subnetwork', color='forestgreen')
+        # plt.fill_between([i for i in range(args.epochs)], mean_mem_but_gen_test_acc - std_mem_but_gen_test_acc, mean_mem_but_gen_test_acc + std_mem_but_gen_test_acc, alpha = 0.3, color='forestgreen')
+        # plt.plot([i for i in range(args.epochs)], mean_gen_test_acc, linestyle='-', label='generalizing subnetwork', color='crimson')
+        # plt.fill_between([i for i in range(args.epochs)], mean_gen_test_acc - std_gen_test_acc, mean_gen_test_acc + std_gen_test_acc, alpha = 0.3, color='crimson')
+        # plt.plot([i for i in range(args.epochs)], mean_all_but_gen_test_acc, linestyle='-', label='complementary subnetwork', color='gold')
+        # plt.fill_between([i for i in range(args.epochs)], mean_all_but_gen_test_acc - std_all_but_gen_test_acc, mean_all_but_gen_test_acc + std_all_but_gen_test_acc, alpha = 0.3, color='gold')
+        # plt.plot([i for i in range(args.epochs)], mean_control_test_acc, linestyle='-', label='control subnetwork', color='deepskyblue')
+        # plt.fill_between([i for i in range(args.epochs)], mean_control_test_acc - std_control_test_acc, mean_control_test_acc + std_control_test_acc, alpha = 0.3, color='deepskyblue')
+        # plt.title('Subnetwork Test Accuracy')
+        # plt.xlabel('epochs')
+        # plt.xscale('log')
+        # plt.legend()
+        # plt.savefig(os.path.join(fig_path, 'subnetwork_test_acc.pdf'))
+        # plt.close()
+
+        # plt.plot([i for i in range(args.epochs)], mean_mem_norm, linestyle='-', label='memorizing subnetwork', color='navy')
+        # plt.fill_between([i for i in range(args.epochs)], mean_mem_norm - std_mem_norm, mean_mem_norm + std_mem_norm, alpha = 0.3, color='navy')
+        # plt.plot([i for i in range(args.epochs)], mean_mem_but_gen_norm, linestyle='-', label='disjoint memorizing subnetwork', color='forestgreen')
+        # plt.fill_between([i for i in range(args.epochs)], mean_mem_but_gen_norm - std_mem_but_gen_norm, mean_mem_but_gen_norm + std_mem_but_gen_norm, alpha = 0.3, color='forestgreen')
+        # plt.plot([i for i in range(args.epochs)], mean_gen_norm, linestyle='-', label='generalizing subnetwork', color='crimson')
+        # plt.fill_between([i for i in range(args.epochs)], mean_gen_norm - std_gen_norm, mean_gen_norm + std_gen_norm, alpha = 0.3, color='crimson')
+        # plt.plot([i for i in range(args.epochs)], mean_all_but_gen_norm, linestyle='-', label='complementary subnetwork', color='gold')
+        # plt.fill_between([i for i in range(args.epochs)], mean_all_but_gen_norm - std_all_but_gen_norm, mean_all_but_gen_norm + std_all_but_gen_norm, alpha = 0.3, color='gold')
+        # plt.plot([i for i in range(args.epochs)], mean_control_norm, linestyle='-', label='control subnetwork', color='deepskyblue')
+        # plt.fill_between([i for i in range(args.epochs)], mean_control_norm - std_control_norm, mean_control_norm + std_control_norm, alpha = 0.3, color='deepskyblue')
+        # plt.title('Subnetwork Weight Norm')
+        # plt.xlabel('epochs')
+        # plt.xscale('log')
+        # plt.legend()
+        # plt.savefig(os.path.join(fig_path, 'subnetwork_norm.pdf'))
+        # plt.close()
+
+        # plt.plot([i for i in range(args.epochs)], mean_mem_train_sens, linestyle='-', label='memorizing subnetwork', color='navy')
+        # plt.fill_between([i for i in range(args.epochs)], mean_mem_train_sens - std_mem_train_sens, mean_mem_train_sens + std_mem_train_sens, alpha = 0.3, color='navy')
+        # plt.plot([i for i in range(args.epochs)], mean_mem_but_gen_train_sens, linestyle='-', label='disjoint memorizing subnetwork', color='forestgreen')
+        # plt.fill_between([i for i in range(args.epochs)], mean_mem_but_gen_train_sens - std_mem_but_gen_train_sens, mean_mem_but_gen_train_sens + std_mem_but_gen_train_sens, alpha = 0.3, color='forestgreen')
+        # plt.plot([i for i in range(args.epochs)], mean_gen_train_sens, linestyle='-', label='generalizing subnetwork', color='crimson')
+        # plt.fill_between([i for i in range(args.epochs)], mean_gen_train_sens - std_gen_train_sens, mean_gen_train_sens + std_gen_train_sens, alpha = 0.3, color='crimson')
+        # plt.plot([i for i in range(args.epochs)], mean_all_but_gen_train_sens, linestyle='-', label='complementary subnetwork', color='gold')
+        # plt.fill_between([i for i in range(args.epochs)], mean_all_but_gen_train_sens - std_all_but_gen_train_sens, mean_all_but_gen_train_sens + std_all_but_gen_train_sens, alpha = 0.3, color='gold')
+        # plt.plot([i for i in range(args.epochs)], mean_control_train_sens, linestyle='-', label='control subnetwork', color='deepskyblue')
+        # plt.fill_between([i for i in range(args.epochs)], mean_control_train_sens - std_control_train_sens, mean_control_train_sens + std_control_train_sens, alpha = 0.3, color='deepskyblue')
+        # plt.title('Subnetwork Train Sensitivity')
+        # plt.xlabel('epochs')
+        # plt.xscale('log')
+        # plt.legend()
+        # plt.savefig(os.path.join(fig_path, 'subnetwork_train_sensitivity.pdf'))
+        # plt.close()
+
+        # plt.plot([i for i in range(args.epochs)], mean_mem_test_sens, linestyle='-', label='memorizing subnetwork', color='navy')
+        # plt.fill_between([i for i in range(args.epochs)], mean_mem_test_sens - std_mem_test_sens, mean_mem_test_sens + std_mem_test_sens, alpha = 0.3, color='navy')
+        # plt.plot([i for i in range(args.epochs)], mean_mem_but_gen_test_sens, linestyle='-', label='disjoint memorizing subnetwork', color='forestgreen')
+        # plt.fill_between([i for i in range(args.epochs)], mean_mem_but_gen_test_sens - std_mem_but_gen_test_sens, mean_mem_but_gen_test_sens + std_mem_but_gen_test_sens, alpha = 0.3, color='forestgreen')
+        # plt.plot([i for i in range(args.epochs)], mean_gen_test_sens, linestyle='-', label='generalizing subnetwork', color='crimson')
+        # plt.fill_between([i for i in range(args.epochs)], mean_gen_test_sens - std_gen_test_sens, mean_gen_test_sens + std_gen_test_sens, alpha = 0.3, color='crimson')
+        # plt.plot([i for i in range(args.epochs)], mean_all_but_gen_test_sens, linestyle='-', label='complementary subnetwork', color='gold')
+        # plt.fill_between([i for i in range(args.epochs)], mean_all_but_gen_test_sens - std_all_but_gen_test_sens, mean_all_but_gen_test_sens + std_all_but_gen_test_sens, alpha = 0.3, color='gold')
+        # plt.plot([i for i in range(args.epochs)], mean_control_test_sens, linestyle='-', label='control subnetwork', color='deepskyblue')
+        # plt.fill_between([i for i in range(args.epochs)], mean_control_test_sens - std_control_test_sens, mean_control_test_sens + std_control_test_sens, alpha = 0.3, color='deepskyblue')
+        # plt.title('Subnetwork Test Sensitivity')
+        # plt.xlabel('epochs')
+        # plt.xscale('log')
+        # plt.legend()
+        # plt.savefig(os.path.join(fig_path, 'subnetwork_test_sensitivity.pdf'))
+        # plt.close()
 
 
-    mean_mem_train_acc, std_mem_train_acc = mean_and_std_across_seeds(mem_accs['train'])
-    np.save(os.path.join(base_dir, 'mean_mem_train_acc'), mean_mem_train_acc)
-    np.save(os.path.join(base_dir, 'std_mem_train_acc'), std_mem_train_acc)
+    if args.arity:
+        # Arity of network over time
+        arities = []
+        _, _, _, test_samples = data_preparation(args, 0, return_raw=True) # load the test samples
+        for seed_id in range(args.n_seeds):
+            arity = []
+            path = os.path.join(base_dir, f'seed{seed_id}_checkpoints')
+            for epoch in range(0, args.epochs, args.sparsity_sampling):
+                _model = FF1(input_dim=args.n, width=args.width).to(device)
+                _model.load_state_dict(torch.load(os.path.join(path, f'model_{epoch}.pt')))
+                
+                finder = ArityFinder(_model, test_samples.to(device))
+                all_active = finder.get_active_inputs("linear1")
+                print('All neurons list', all_active)
 
-    mean_mem_test_acc, std_mem_test_acc = mean_and_std_across_seeds(mem_accs['test'])
-    np.save(os.path.join(base_dir, 'mean_mem_test_acc'), mean_mem_test_acc)
-    np.save(os.path.join(base_dir, 'std_mem_test_acc'), std_mem_test_acc)
+                all_active_merged = list(itertools.chain.from_iterable(all_active))
+                _arity = list(set(all_active_merged))
+                print('number of Active indices', len(_arity))
+                arity.append(len(_arity))
 
-    mean_gen_train_acc, std_gen_train_acc = mean_and_std_across_seeds(gen_accs['train'])
-    np.save(os.path.join(base_dir, 'mean_gen_train_acc'), mean_gen_train_acc)
-    np.save(os.path.join(base_dir, 'std_gen_train_acc'), std_mem_train_acc)
+                if (seed_id == 0):
+                    neuron_arities = [len(x) for x in all_active]
+                    print(sum(neuron_arities))
+                    bins = np.arange(0, max(neuron_arities) + 1.5) - 0.5
+                    np.save(os.path.join(base_dir, f'neurons_arity_epoch{epoch}'), np.array(neuron_arities))
 
-    mean_gen_test_acc, std_gen_test_acc = mean_and_std_across_seeds(gen_accs['test'])
-    np.save(os.path.join(base_dir, 'mean_gen_test_acc'), mean_gen_test_acc)
-    np.save(os.path.join(base_dir, 'std_gen_test_acc'), std_gen_test_acc)
+                    plt.hist(neuron_arities, bins=bins)
+                    plt.xticks(bins + 0.5)
+                    plt.title(f'Distribution of arity of neurons (epoch {epoch})')
+                    plt.xlabel('epochs')
+                    plt.ylabel('#bits')
+                    plt.savefig(os.path.join(fig_path, f'neurons_arity_epoch{epoch}.pdf'))
+                    plt.close()
 
-    plt.plot([i for i in range(args.epochs)], mean_mem_train_acc, linestyle='-', label='memorizing subnetwork', color='navy')
-    plt.fill_between([i for i in range(args.epochs)], mean_mem_train_acc - std_mem_train_acc, mean_mem_train_acc + std_mem_train_acc, alpha = 0.3, color='navy')
-    plt.plot([i for i in range(args.epochs)], mean_gen_train_acc, linestyle='-', label='generalizing subnetwork', color='crimson')
-    plt.fill_between([i for i in range(args.epochs)], mean_gen_train_acc - std_gen_train_acc, mean_gen_train_acc + std_gen_train_acc, alpha = 0.3, color='crimson')
-    plt.title('Subnetwork Train Accuracy')
-    plt.xlabel('epochs')
-    plt.xscale('log')
-    plt.legend()
-    plt.savefig(os.path.join(fig_path, 'subnetwork_train_acc.pdf'))
-    plt.close()
+            arities.append(arity)
 
-    plt.plot([i for i in range(args.epochs)], mean_mem_test_acc, linestyle='-', label='memorizing subnetwork', color='navy')
-    plt.fill_between([i for i in range(args.epochs)], mean_mem_test_acc - std_mem_test_acc, mean_mem_test_acc + std_mem_test_acc, alpha = 0.3, color='navy')
-    plt.plot([i for i in range(args.epochs)], mean_gen_train_acc, linestyle='-', label='generalizing subnetwork', color='crimson')
-    plt.fill_between([i for i in range(args.epochs)], mean_gen_test_acc - std_gen_test_acc, mean_gen_test_acc + std_gen_test_acc, alpha = 0.3, color='crimson')
-    plt.title('Subnetwork Test Accuracy')
-    plt.xlabel('epochs')
-    plt.xscale('log')
-    plt.legend()
-    plt.savefig(os.path.join(fig_path, 'subnetwork_test_acc.pdf'))
-    plt.close()
+        mean_arity, std_arity = mean_and_std_across_seeds(arities)
+        np.save(os.path.join(base_dir, 'mean_arity_over_time'), mean_arity)
+        np.save(os.path.join(base_dir, 'std_arity_over_time'), std_arity)
+
+        plt.plot([i for i in range(0, args.epochs, args.sparsity_sampling)], mean_arity, linestyle='-')
+        plt.fill_between([i for i in range(0, args.epochs, args.sparsity_sampling)], mean_arity - std_arity, mean_arity + std_arity, alpha = 0.3)
+        plt.title('Arity of network')
+        plt.xlabel('epochs')
+        plt.ylabel('#bits')
+        plt.xscale('log')
+        plt.savefig(os.path.join(fig_path, 'arity.pdf'))
+        plt.close()
 
 if __name__ == '__main__':
     main()
