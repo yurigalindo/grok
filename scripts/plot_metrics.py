@@ -21,7 +21,7 @@ def metric_plots(filename):
         frame.plot(x='step', y=['train_accuracy','val_accuracy'], kind='line')
         plt.title("Plots")
         plt.xscale('log')
-        # plt.savefig("original.png")
+        plt.savefig(f"{filename.split('/')[-2]}.png")
         plt.show()
 
 if __name__ == '__main__':
